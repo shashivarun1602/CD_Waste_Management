@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CD Waste Management</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="/"><span class="brand-mark">CD</span><span>Chainline<br><small>Waste operations</small></span></a>
+      <nav class="nav-list" aria-label="Main navigation">
+        <button class="nav-item active" data-view="dashboard">Overview</button>
+        <button class="nav-item" data-view="sites">Construction sites</button>
+        <button class="nav-item" data-view="vehicles">Vehicles</button>
+        <button class="nav-item" data-view="transport">Transport monitor</button>
+        <button class="nav-item" data-view="tracking">GPS tracking</button>
+      </nav>
+      <div class="sidebar-footer"><span class="status-dot"></span><span>Software mode<br><small>Manual inputs enabled</small></span></div>
+    </aside>
+    <main class="main-content">
+      <header class="topbar"><div><p class="eyebrow">Operations / <span id="view-label">Overview</span></p><h1 id="page-title">Chain of custody, at a glance.</h1></div><div class="api-pill"><span class="status-dot"></span><span id="health-status">Connecting</span></div></header>
+      <div id="flash" class="flash" role="status"></div>
+      <section id="dashboard-view" class="view active-view">
+        <div id="stats-grid" class="stats-grid"></div>
+        <div class="content-grid"><section class="panel wide-panel"><div class="panel-heading"><div><p class="eyebrow">Recent movement</p><h2>Latest transports</h2></div><button class="text-button" data-view="transport">View monitor <span>-></span></button></div><div class="table-wrap"><table><thead><tr><th>Trip</th><th>Route</th><th>Material</th><th>Status</th><th>Loaded</th></tr></thead><tbody id="recent-transports"></tbody></table></div></section><section class="panel alert-panel"><p class="eyebrow">Attention</p><h2>Verification queue</h2><div id="verification-alerts" class="alert-list"></div></section></div>
+      </section>
+      <section id="sites-view" class="view"><div class="section-heading"><div><p class="eyebrow">Permanent entities</p><h2>Construction sites</h2></div><button class="primary-button" id="add-site">+ Add site</button></div><section class="panel"><div class="table-wrap"><table><thead><tr><th>Site ID</th><th>Name</th><th>Project</th><th>Address</th><th>Status</th></tr></thead><tbody id="sites-table"></tbody></table></div></section></section>
+      <section id="vehicles-view" class="view"><div class="section-heading"><div><p class="eyebrow">Permanent entities</p><h2>Vehicle fleet</h2></div><button class="primary-button" id="add-vehicle">+ Add vehicle</button></div><section class="panel"><div class="table-wrap"><table><thead><tr><th>Vehicle ID</th><th>Registration</th><th>Type</th><th>Capacity</th><th>Status</th><th>History</th></tr></thead><tbody id="vehicles-table"></tbody></table></div></section></section>
+      <section id="transport-view" class="view"><div class="section-heading"><div><p class="eyebrow">Transaction records</p><h2>Transport monitor</h2></div><button class="primary-button" id="add-transport">+ New transport</button></div><section class="panel"><div class="table-wrap"><table><thead><tr><th>Trip</th><th>Site / facility</th><th>Vehicle</th><th>Waste</th><th>Weight</th><th>Status</th><th>Actions</th></tr></thead><tbody id="transport-table"></tbody></table></div></section></section>
+      <section id="tracking-view" class="view"><div class="section-heading"><div><p class="eyebrow">Software simulation</p><h2>GPS tracking</h2></div></div><div class="content-grid"><section class="panel"><div class="panel-heading"><div><p class="eyebrow">Manual point entry</p><h2>Record a location</h2></div></div><form id="gps-form" class="form-grid"><label>Transport ID<input name="transport_id" required placeholder="TRN-0001"></label><label>Latitude<input name="latitude" type="number" step="any" required></label><label>Longitude<input name="longitude" type="number" step="any" required></label><label>Speed km/h<input name="speed_kmph" type="number" min="0" value="0"></label><button class="primary-button" type="submit">Record GPS point</button></form></section><section class="panel"><div class="panel-heading"><div><p class="eyebrow">Latest signals</p><h2>Tracking feed</h2></div></div><div id="gps-feed" class="feed-list"></div></section></div></section>
+    </main>
+  </div>
+  <div id="modal" class="modal" aria-hidden="true"><div class="modal-card"><button class="modal-close" id="modal-close" aria-label="Close">x</button><div id="modal-content"></div></div></div>
+  <script src="/js/api.js"></script><script src="/js/dashboard.js"></script><script src="/js/app.js"></script>
+</body>
+</html>
