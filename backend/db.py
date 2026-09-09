@@ -13,6 +13,8 @@ COLLECTIONS = (
     "waste_records",
     "transport_records",
     "gps_tracking",
+    "devices",
+    "weight_readings",
     "counters",
 )
 
@@ -35,14 +37,30 @@ def init_db():
         "waste_records": [("waste_id", ASCENDING), ("site_id", ASCENDING)],
         "transport_records": [("transport_id", ASCENDING), ("site_id", ASCENDING), ("vehicle_id", ASCENDING), ("driver_id", ASCENDING), ("facility_id", ASCENDING), ("status", ASCENDING)],
         "gps_tracking": [("transport_id", ASCENDING), ("vehicle_id", ASCENDING), ("timestamp", DESCENDING)],
+        "devices": [("device_id", ASCENDING), ("vehicle_id", ASCENDING), ("status", ASCENDING)],
+        "weight_readings": [("transport_id", ASCENDING), ("vehicle_id", ASCENDING), ("device_id", ASCENDING), ("timestamp", DESCENDING)],
     }
     try:
+        try:
+            database.gps_tracking.drop_index("transport_id_1")
+        except Exception:
+            pass
         for collection_name, fields in indexes.items():
             collection = database[collection_name]
             for field, direction in fields:
-                collection.create_index([(field, direction)], unique=field.endswith("_id") and field not in {"site_id", "vehicle_id", "driver_id", "facility_id"})
+                unique = (collection_name, field) in {
+                    ("construction_sites", "site_id"),
+                    ("vehicles", "vehicle_id"),
+                    ("drivers", "driver_id"),
+                    ("facilities", "facility_id"),
+                    ("waste_records", "waste_id"),
+                    ("transport_records", "transport_id"),
+                    ("devices", "device_id"),
+                }
+                collection.create_index([(field, direction)], unique=unique)
         database.vehicles.create_index("registration_number", unique=True)
         database.drivers.create_index("license_number", unique=True, sparse=True)
+        database.devices.create_index("device_id", unique=True)
         database.counters.create_index("_id", unique=True)
     except Exception:
         # MongoDB may be offline during frontend-only development; connect lazily on request.

@@ -24,4 +24,8 @@ def dashboard():
         "total_waste_received_kg": sum((item.get("received_weight_kg") or 0) for item in transport_records.find({}, {"received_weight_kg": 1})),
         "recent_transports": list(transport_records.find({}, {"_id": 0}).sort("created_at", -1).limit(8)),
     }
+    for item in stats["recent_transports"]:
+        device = database.devices.find_one({"vehicle_id": item.get("vehicle_id")}, {"_id": 0, "device_id": 1})
+        item["device_id"] = device.get("device_id") if device else None
+        item["latest_route_status"] = item.get("latest_route_status", "NO_ROUTE")
     return success(stats, "Dashboard data loaded")

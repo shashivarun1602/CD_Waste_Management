@@ -6,6 +6,8 @@ from flask_cors import CORS
 from config import Config
 from db import init_db
 from routes.dashboard import dashboard_bp
+from routes.device_data import device_data_bp
+from routes.devices import devices_bp
 from routes.drivers import drivers_bp
 from routes.facilities import facilities_bp
 from routes.gps import gps_bp
@@ -30,6 +32,8 @@ for blueprint in (
     transport_bp,
     gps_bp,
     dashboard_bp,
+    devices_bp,
+    device_data_bp,
 ):
     app.register_blueprint(blueprint, url_prefix="/api")
 

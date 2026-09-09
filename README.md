@@ -9,8 +9,9 @@ A software-only Flask and MongoDB MVP for tracking construction and demolition w
 - `backend/utils/`: IDs, validation, and common response envelopes
 - `frontend/`: HTML/CSS/JavaScript operations dashboard
 - MongoDB database: `cd_waste_management`
+- Hardware simulation: the dashboard sends simulated ESP32 data through `/api/device/gps` and `/api/device/weight`.
 
-Manual and future device data use the same endpoints with `source` set to `manual`, `device`, or `api`. No ESP32, HX711, GPS, or load-cell hardware is required.
+Manual data remains supported. Device GPS and weight requests resolve `Device -> Vehicle -> Active Transport` on the server, so the client cannot assign readings to an arbitrary transport. No physical ESP32, HX711, GPS, or load-cell hardware is required for the demonstration.
 
 ## Setup
 
@@ -32,7 +33,7 @@ python backend\seed.py
 
 ## Collections
 
-`construction_sites`, `vehicles`, `drivers`, `facilities`, `waste_records`, `transport_records`, and `gps_tracking` are created/indexed by the backend. The internal `counters` collection generates permanent IDs.
+`construction_sites`, `vehicles`, `drivers`, `facilities`, `waste_records`, `transport_records`, `gps_tracking`, `devices`, and `weight_readings` are created/indexed by the backend. The internal `counters` collection generates permanent IDs. GPS and weight histories remain separate records associated with their resolved transport.
 
 ## API
 
@@ -46,6 +47,9 @@ All responses use `{ "success": true, "message": "...", "data": ... }` or the ma
 - `GET|POST /api/transports`, `GET /api/transports/<transport_id>`
 - `POST /api/transports/<transport_id>/load|start|arrive|verify|complete|weight`
 - `GET|POST /api/gps`, `GET /api/gps?transport_id=TRN-0001`
+- `GET|POST /api/devices`, `GET|PUT|DELETE /api/devices/<device_id>`
+- `POST /api/device/gps`, `POST /api/device/weight`, `GET /api/device/weight?transport_id=TRN-0001`
+- `GET /api/facilities/recommend?waste_type=Concrete&latitude=17.385&longitude=78.4867`
 - `GET /api/dashboard`, `GET /health`
 
 Transport status is enforced as `Created -> Loaded -> In Transit -> Arrived -> Verified -> Completed`. A weight mismatch is marked `Mismatch` and cannot be completed automatically.
@@ -56,4 +60,4 @@ Transport status is enforced as `Created -> Loaded -> In Transit -> Arrived -> V
 .venv\Scripts\python.exe -m unittest discover -s backend\tests -p "test_*.py"
 ```
 
-The tests cover common responses, weight verification, lifecycle restrictions, and vehicle reuse semantics. Full MongoDB integration testing requires a running MongoDB instance.
+The tests cover common responses, weight verification, lifecycle restrictions, vehicle reuse semantics, device routing, invalid/inactive device rejection, weight history, facility filtering, and GPS route compliance. Full MongoDB integration testing requires a running MongoDB instance.

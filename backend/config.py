@@ -13,3 +13,4 @@ class Config:
     MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
     DATABASE_NAME = os.getenv("DATABASE_NAME", "cd_waste_management")
     VERIFICATION_THRESHOLD_PERCENT = float(os.getenv("VERIFICATION_THRESHOLD_PERCENT", "5"))
+    ROUTE_DEVIATION_THRESHOLD_METERS = float(os.getenv("ROUTE_DEVIATION_THRESHOLD_METERS", "500"))

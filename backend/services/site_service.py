@@ -13,6 +13,7 @@ def get_site(site_id):
 
 
 def create_site(data):
+    data = dict(data)
     data.setdefault("status", "Active")
     return create_document(COLLECTION, FIELD, "CON", data)
 
