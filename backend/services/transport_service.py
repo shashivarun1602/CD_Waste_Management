@@ -48,10 +48,11 @@ def create_transport(data):
     references = (
         ("construction_sites", "site_id", data.get("site_id"), "site"),
         ("vehicles", "vehicle_id", data.get("vehicle_id"), "vehicle"),
-        ("drivers", "driver_id", data.get("driver_id"), "driver"),
         ("facilities", "facility_id", data.get("facility_id"), "facility"),
         ("waste_records", "waste_id", data.get("waste_id"), "waste record"),
     )
+    if data.get("driver_id"):
+        references += (("drivers", "driver_id", data["driver_id"], "driver"),)
     for collection_name, field, identifier, label in references:
         if not identifier or not _reference_exists(collection_name, field, identifier):
             raise ValueError(f"{label.title()} not found")
@@ -68,7 +69,9 @@ def create_transport(data):
     waste_type = str(waste.get("waste_type", "")).strip().lower()
     if facility_types and waste_type not in facility_types and "mixed c&d" not in facility_types and "mixed_cnd" not in facility_types:
         raise ValueError("Facility is not authorized for this waste type")
-    active_query = {"status": {"$in": list(ACTIVE_STATUSES)}, "$or": [{"vehicle_id": data["vehicle_id"]}, {"driver_id": data["driver_id"]}]}
+    active_query = {"status": {"$in": list(ACTIVE_STATUSES)}, "vehicle_id": data["vehicle_id"]}
+    if data.get("driver_id"):
+        active_query = {"status": {"$in": list(ACTIVE_STATUSES)}, "$or": [{"vehicle_id": data["vehicle_id"]}, {"driver_id": data["driver_id"]}]}
     if collection(COLLECTION).find_one(active_query):
         raise RuntimeError("Vehicle or driver is already assigned to an active transport")
     data = dict(data)
@@ -76,7 +79,8 @@ def create_transport(data):
     transport = create_document(COLLECTION, FIELD, "TRN", data)
     timestamp = now()
     collection("vehicles").update_one({"vehicle_id": data["vehicle_id"]}, {"$set": {"status": "Assigned", "current_site_id": data["site_id"], "updated_at": timestamp}})
-    collection("drivers").update_one({"driver_id": data["driver_id"]}, {"$set": {"status": "Assigned", "updated_at": timestamp}})
+    if data.get("driver_id"):
+        collection("drivers").update_one({"driver_id": data["driver_id"]}, {"$set": {"status": "Assigned", "updated_at": timestamp}})
     return transport
 
 
@@ -91,7 +95,8 @@ def _change_status(transport_id, next_status, updates=None):
     if next_status == "In Transit":
         updates["started_at"] = now()
         collection("vehicles").update_one({"vehicle_id": transport["vehicle_id"]}, {"$set": {"status": "In Transit", "updated_at": now()}})
-        collection("drivers").update_one({"driver_id": transport["driver_id"]}, {"$set": {"status": "On Trip", "updated_at": now()}})
+        if transport.get("driver_id"):
+            collection("drivers").update_one({"driver_id": transport["driver_id"]}, {"$set": {"status": "On Trip", "updated_at": now()}})
     elif next_status == "Arrived":
         updates["arrived_at"] = now()
     elif next_status in {"Verified", "Mismatch"}:
@@ -99,7 +104,8 @@ def _change_status(transport_id, next_status, updates=None):
     elif next_status == "Completed":
         updates["completed_at"] = now()
         collection("vehicles").update_one({"vehicle_id": transport["vehicle_id"]}, {"$set": {"status": "Available", "current_site_id": None, "updated_at": now()}})
-        collection("drivers").update_one({"driver_id": transport["driver_id"]}, {"$set": {"status": "Available", "updated_at": now()}})
+        if transport.get("driver_id"):
+            collection("drivers").update_one({"driver_id": transport["driver_id"]}, {"$set": {"status": "Available", "updated_at": now()}})
     return update_document(COLLECTION, FIELD, transport_id, updates)
 
 
