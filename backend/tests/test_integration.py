@@ -65,6 +65,66 @@ class CompleteWorkflowIntegrationTest(unittest.TestCase):
         self.assertEqual(completed.status_code, 200, completed.get_json())
         self.assertEqual(completed.get_json()["data"]["status"], "Completed")
 
+    def test_transport_creation_does_not_require_waste_id_or_driver_id(self):
+        site = self.create("/api/sites", {"name": f"Optional Waste Site {self.suffix}", "address": "Hyderabad"}, "construction_sites", "site_id")
+        vehicle = self.create("/api/vehicles", {"registration_number": f"TS09NW{self.suffix}", "vehicle_type": "Tipper Truck", "capacity_kg": 10000}, "vehicles", "vehicle_id")
+        facility = self.create("/api/facilities", {"name": f"Optional Waste Facility {self.suffix}", "facility_type": "Recycling", "address": "Hyderabad", "authorized": True}, "facilities", "facility_id")
+
+        transport = self.create("/api/transports", {
+            "site_id": site["site_id"],
+            "vehicle_id": vehicle["vehicle_id"],
+            "facility_id": facility["facility_id"],
+        }, "transport_records", "transport_id")
+
+        stored = self.database.transport_records.find_one({"transport_id": transport["transport_id"]})
+        self.assertNotIn("waste_id", stored)
+        self.assertNotIn("driver_id", stored)
+
+    def test_reused_vehicle_history_stays_scoped_to_site(self):
+        site_a = self.create("/api/sites", {"name": f"Reuse Site A {self.suffix}", "address": "Site A"}, "construction_sites", "site_id")
+        site_b = self.create("/api/sites", {"name": f"Reuse Site B {self.suffix}", "address": "Site B"}, "construction_sites", "site_id")
+        vehicle = self.create("/api/vehicles", {"registration_number": f"TS09RV{self.suffix}", "vehicle_type": "Tipper Truck", "capacity_kg": 10000}, "vehicles", "vehicle_id")
+        facility = self.create("/api/facilities", {"name": f"Reuse Facility {self.suffix}", "facility_type": "Recycling", "address": "Facility", "authorized": True}, "facilities", "facility_id")
+
+        def complete_trip(site, loaded_weight):
+            transport = self.create("/api/transports", {
+                "site_id": site["site_id"],
+                "vehicle_id": vehicle["vehicle_id"],
+                "facility_id": facility["facility_id"],
+            }, "transport_records", "transport_id")
+            transport_id = transport["transport_id"]
+            self.assertEqual(self.api.post(f"/api/transports/{transport_id}/load", json={"weight_kg": loaded_weight}).status_code, 200)
+            self.assertEqual(self.api.post(f"/api/transports/{transport_id}/start", json={}).status_code, 200)
+            self.assertEqual(self.api.post(f"/api/transports/{transport_id}/arrive", json={"received_weight_kg": loaded_weight}).status_code, 200)
+            self.assertEqual(self.api.post(f"/api/transports/{transport_id}/verify", json={}).status_code, 200)
+            self.assertEqual(self.api.post(f"/api/transports/{transport_id}/complete", json={}).status_code, 200)
+            return transport_id
+
+        trip_a1 = complete_trip(site_a, 1000)
+        trip_a2 = complete_trip(site_a, 1200)
+        trip_b1 = complete_trip(site_b, 800)
+
+        all_sites = self.api.get("/api/dashboard/sites").get_json()["data"]
+        all_sites_by_id = {site_summary["site_id"]: site_summary for site_summary in all_sites}
+        self.assertEqual(all_sites_by_id[site_a["site_id"]]["total_transports"], 2)
+        self.assertEqual(all_sites_by_id[site_b["site_id"]]["total_transports"], 1)
+        site_a_summary = self.api.get(f"/api/dashboard/sites/{site_a['site_id']}").get_json()["data"]
+        site_b_summary = self.api.get(f"/api/dashboard/sites/{site_b['site_id']}").get_json()["data"]
+        self.assertEqual(site_a_summary["total_transports"], 2)
+        self.assertEqual(site_a_summary["total_loaded_weight_kg"], 2200)
+        self.assertEqual(site_a_summary["completed_transports"], 2)
+        self.assertEqual(site_b_summary["total_transports"], 1)
+        self.assertEqual(site_b_summary["total_loaded_weight_kg"], 800)
+
+        site_a_vehicles = self.api.get(f"/api/dashboard/sites/{site_a['site_id']}/vehicles").get_json()["data"]
+        self.assertEqual([item["vehicle_id"] for item in site_a_vehicles], [vehicle["vehicle_id"]])
+        site_a_diary = self.api.get(f"/api/dashboard/sites/{site_a['site_id']}/vehicles/{vehicle['vehicle_id']}/transports").get_json()["data"]
+        site_b_diary = self.api.get(f"/api/dashboard/sites/{site_b['site_id']}/vehicles/{vehicle['vehicle_id']}/transports").get_json()["data"]
+        self.assertEqual({item["transport_id"] for item in site_a_diary}, {trip_a1, trip_a2})
+        self.assertEqual({item["transport_id"] for item in site_b_diary}, {trip_b1})
+        self.assertTrue(all(item["site_id"] == site_a["site_id"] for item in site_a_diary))
+        self.assertTrue(all(item["site_id"] == site_b["site_id"] for item in site_b_diary))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -25,6 +25,8 @@ def create_device():
     missing = missing_fields(data, ["vehicle_id"])
     if missing:
         return error(f"Missing required fields: {', '.join(missing)}", "MISSING_FIELDS")
+    if data.get("device_id") is not None and (not isinstance(data["device_id"], str) or not data["device_id"].strip()):
+        return error("device_id must be a non-empty string", "INVALID_DEVICE_ID")
     if not device_service.collection("vehicles").find_one({"vehicle_id": data["vehicle_id"]}):
         return error("Vehicle not found", "VEHICLE_NOT_FOUND", 404)
     try:

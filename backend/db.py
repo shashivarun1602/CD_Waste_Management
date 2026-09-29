@@ -36,9 +36,9 @@ def init_db():
         "facilities": [("facility_id", ASCENDING), ("status", ASCENDING)],
         "waste_records": [("waste_id", ASCENDING), ("site_id", ASCENDING)],
         "transport_records": [("transport_id", ASCENDING), ("site_id", ASCENDING), ("vehicle_id", ASCENDING), ("driver_id", ASCENDING), ("facility_id", ASCENDING), ("status", ASCENDING)],
-        "gps_tracking": [("transport_id", ASCENDING), ("vehicle_id", ASCENDING), ("timestamp", DESCENDING)],
+        "gps_tracking": [("transport_id", ASCENDING), ("vehicle_id", ASCENDING), ("device_id", ASCENDING), ("timestamp", DESCENDING)],
         "devices": [("device_id", ASCENDING), ("vehicle_id", ASCENDING), ("status", ASCENDING)],
-        "weight_readings": [("transport_id", ASCENDING), ("vehicle_id", ASCENDING), ("device_id", ASCENDING), ("timestamp", DESCENDING)],
+        "weight_readings": [("reading_id", ASCENDING), ("transport_id", ASCENDING), ("vehicle_id", ASCENDING), ("device_id", ASCENDING), ("timestamp", DESCENDING)],
     }
     try:
         try:
@@ -56,6 +56,7 @@ def init_db():
                     ("waste_records", "waste_id"),
                     ("transport_records", "transport_id"),
                     ("devices", "device_id"),
+                    ("weight_readings", "reading_id"),
                 }
                 collection.create_index([(field, direction)], unique=unique)
         database.vehicles.create_index("registration_number", unique=True)

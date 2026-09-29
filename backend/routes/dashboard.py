@@ -1,9 +1,35 @@
 from flask import Blueprint
 
 from db import get_database
-from utils.response import success
+from services import dashboard_service
+from utils.response import error, success
 
 dashboard_bp = Blueprint("dashboard", __name__)
+
+
+@dashboard_bp.get("/dashboard/sites")
+def site_summaries():
+    return success(dashboard_service.list_site_summaries(), "Site summaries loaded")
+
+
+@dashboard_bp.get("/dashboard/sites/<site_id>")
+def site_summary(site_id):
+    summary = dashboard_service.get_site_summary(site_id)
+    return success(summary, "Site summary loaded") if summary else error("Site not found", "SITE_NOT_FOUND", 404)
+
+
+@dashboard_bp.get("/dashboard/sites/<site_id>/vehicles")
+def site_vehicles(site_id):
+    vehicles = dashboard_service.list_site_vehicle_summaries(site_id)
+    return success(vehicles, "Site vehicles loaded") if vehicles is not None else error("Site not found", "SITE_NOT_FOUND", 404)
+
+
+@dashboard_bp.get("/dashboard/sites/<site_id>/vehicles/<vehicle_id>/transports")
+def site_vehicle_transports(site_id, vehicle_id):
+    transports = dashboard_service.list_site_vehicle_transports(site_id, vehicle_id)
+    if transports is None:
+        return error("Site or vehicle not found", "REFERENCE_NOT_FOUND", 404)
+    return success(transports, "Site vehicle transports loaded")
 
 
 @dashboard_bp.get("/dashboard")

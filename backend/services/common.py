@@ -27,10 +27,10 @@ def get_document(name, identifier_field, identifier):
     return document_to_dict(collection(name).find_one({identifier_field: identifier}))
 
 
-def create_document(name, identifier_field, prefix, data):
+def create_document(name, identifier_field, prefix, data, identifier=None):
     timestamp = now()
     document = dict(data)
-    document[identifier_field] = generate_id(prefix)
+    document[identifier_field] = identifier or generate_id(prefix)
     document["created_at"] = timestamp
     document["updated_at"] = timestamp
     collection(name).insert_one(document)

@@ -49,7 +49,6 @@ def create_transport(data):
         ("construction_sites", "site_id", data.get("site_id"), "site"),
         ("vehicles", "vehicle_id", data.get("vehicle_id"), "vehicle"),
         ("facilities", "facility_id", data.get("facility_id"), "facility"),
-        ("waste_records", "waste_id", data.get("waste_id"), "waste record"),
     )
     if data.get("driver_id"):
         references += (("drivers", "driver_id", data["driver_id"], "driver"),)
@@ -57,18 +56,11 @@ def create_transport(data):
         if not identifier or not _reference_exists(collection_name, field, identifier):
             raise ValueError(f"{label.title()} not found")
     site = _reference_exists("construction_sites", "site_id", data["site_id"])
-    waste = _reference_exists("waste_records", "waste_id", data["waste_id"])
-    if waste.get("site_id") != data["site_id"]:
-        raise ValueError("Waste record does not belong to the selected site")
     if site.get("status") != "Active":
         raise ValueError("Construction site is not active")
     facility = _reference_exists("facilities", "facility_id", data["facility_id"])
     if facility.get("status") != "Active" or not facility.get("authorized"):
         raise ValueError("Facility is not active and authorized")
-    facility_types = {str(value).strip().lower() for value in facility.get("authorized_waste_types", [])}
-    waste_type = str(waste.get("waste_type", "")).strip().lower()
-    if facility_types and waste_type not in facility_types and "mixed c&d" not in facility_types and "mixed_cnd" not in facility_types:
-        raise ValueError("Facility is not authorized for this waste type")
     active_query = {"status": {"$in": list(ACTIVE_STATUSES)}, "vehicle_id": data["vehicle_id"]}
     if data.get("driver_id"):
         active_query = {"status": {"$in": list(ACTIVE_STATUSES)}, "$or": [{"vehicle_id": data["vehicle_id"]}, {"driver_id": data["driver_id"]}]}

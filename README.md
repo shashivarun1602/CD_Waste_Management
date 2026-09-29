@@ -54,6 +54,53 @@ All responses use `{ "success": true, "message": "...", "data": ... }` or the ma
 
 Transport status is enforced as `Created -> Loaded -> In Transit -> Arrived -> Verified -> Completed`. A weight mismatch is marked `Mismatch` and cannot be completed automatically.
 
+## ESP32 Phase 1 Prototype
+
+Set a local shared demo token in `backend/.env`:
+
+```text
+DEVICE_API_TOKEN=replace-with-a-long-random-local-demo-token
+DEVICE_ONLINE_WINDOW_SECONDS=90
+```
+
+The device telemetry routes require that value in the `X-Device-Token` header. This shared token is for a trusted local prototype, not production authentication. Register the hardware ID against its vehicle, for example `POST /api/devices` with `{"device_id":"DEV-0001","vehicle_id":"VEH-0001"}`. Set the active trip ID and the same token in `firmware/esp32/esp32_waste_monitor.ino`.
+
+The sketch posts GPS to `/api/device/gps` and raw HX711 counts to `/api/device/weight`. Raw readings use `calibration_status: "NOT_SET"` and `weight_kg: null`; they do not update transport kilogram weights. Existing calibrated `weight_kg` requests remain supported.
+
+Example GPS request:
+
+```json
+{
+	"device_id": "DEV-0001",
+	"transport_id": "TRN-0001",
+	"latitude": 17.385,
+	"longitude": 78.4867,
+	"satellites": 8,
+	"gps_fix": true,
+	"timestamp": "2026-09-29T10:00:00Z",
+	"source": "device"
+}
+```
+
+Example raw HX711 request:
+
+```json
+{
+	"device_id": "DEV-0001",
+	"transport_id": "TRN-0001",
+	"raw_value": -209177,
+	"calibration_status": "NOT_SET",
+	"weight_kg": null,
+	"timestamp": "2026-09-29T10:00:00Z"
+}
+```
+
+Send both requests with `X-Device-Token: <DEVICE_API_TOKEN>`. The transport ID must be an active trip belonging to the device's assigned vehicle. If a GPS fix is unavailable, send `gps_fix: false` with null coordinates; no route origin is created from that point.
+
+Flask already binds to `0.0.0.0` on `PORT` (5000 by default). Find the computer's Wi-Fi IPv4 address with `ipconfig`, set `FLASK_BASE_URL` in the sketch to `http://<computer-lan-ip>:5000`, and allow that port through the local firewall. Do not use `localhost` in the sketch.
+
+For Arduino IDE, select **ESP32 Dev Module**, set upload speed to **115200**, and use the detected serial port. Install **ArduinoJson**, **TinyGPSPlus**, **HX711**, **Adafruit SSD1306**, and **Adafruit GFX Library** through Library Manager. The sketch uses UART2 (ESP32 RX 25/TX 26), HX711 DT/SCK 18/19, and OLED SDA/SCL 21/22. Wi-Fi credentials and the Flask URL are compile-time constants in the sketch.
+
 ## Testing
 
 ```powershell

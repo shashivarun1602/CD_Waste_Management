@@ -23,7 +23,7 @@ def get_transport(transport_id):
 @transport_bp.post("/transports")
 def create_transport():
     data = request.get_json(silent=True) or {}
-    missing = missing_fields(data, ["site_id", "vehicle_id", "facility_id", "waste_id"])
+    missing = missing_fields(data, ["site_id", "vehicle_id", "facility_id"])
     if missing:
         return error(f"Missing required fields: {', '.join(missing)}", "MISSING_FIELDS")
     try:

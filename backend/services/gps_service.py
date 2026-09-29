@@ -23,30 +23,37 @@ def latest_gps_point(transport_id):
 
 def add_device_gps_point(data):
     device_id = data["device_id"]
-    device, vehicle, transport = resolve_device_transport(device_id)
-    latitude = float(data["latitude"])
-    longitude = float(data["longitude"])
+    device, vehicle, transport = resolve_device_transport(device_id, data.get("transport_id"))
+    latitude = float(data["latitude"]) if data.get("latitude") is not None else None
+    longitude = float(data["longitude"]) if data.get("longitude") is not None else None
     timestamp = data.get("timestamp") or now()
-    set_route_origin(transport["transport_id"], latitude, longitude)
-    refreshed_transport = collection("transport_records").find_one({"transport_id": transport["transport_id"]})
-    route_status, deviation = evaluate_route(refreshed_transport, latitude, longitude)
+    gps_fix = data.get("gps_fix", True)
+    if gps_fix:
+        set_route_origin(transport["transport_id"], latitude, longitude)
+        refreshed_transport = collection("transport_records").find_one({"transport_id": transport["transport_id"]})
+        route_status, deviation = evaluate_route(refreshed_transport, latitude, longitude)
+    else:
+        route_status, deviation = "NO_FIX", None
     point = create_document("gps_tracking", "tracking_id", "GPS", {
         "device_id": device["device_id"],
         "vehicle_id": vehicle["vehicle_id"],
         "transport_id": transport["transport_id"],
         "latitude": latitude,
         "longitude": longitude,
+        "satellites": data.get("satellites"),
+        "gps_fix": gps_fix,
         "timestamp": timestamp,
         "route_status": route_status,
         "deviation_distance_meters": deviation,
         "source": "device",
     })
     collection("transport_records").update_one({"transport_id": transport["transport_id"]}, {"$set": {
-        "latest_gps": {"latitude": latitude, "longitude": longitude, "timestamp": timestamp},
+        "latest_gps": {"latitude": latitude, "longitude": longitude, "satellites": data.get("satellites"), "gps_fix": gps_fix, "timestamp": timestamp},
         "latest_route_status": route_status,
         "updated_at": now(),
     }})
-    touch_device(device_id, timestamp)
-    collection("vehicles").update_one({"vehicle_id": vehicle["vehicle_id"]}, {"$set": {"last_seen": timestamp, "updated_at": now()}})
+    received_at = now()
+    touch_device(device_id, received_at)
+    collection("vehicles").update_one({"vehicle_id": vehicle["vehicle_id"]}, {"$set": {"last_seen": received_at, "updated_at": received_at}})
     point.update({"device_id": device["device_id"], "vehicle_id": vehicle["vehicle_id"], "transport_id": transport["transport_id"], "route_status": route_status})
     return point
