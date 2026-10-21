@@ -33,13 +33,24 @@ def create_device():
         return success(device_service.create_device(data), "Device registered successfully", 201)
     except DuplicateKeyError:
         return error("Device already exists", "DUPLICATE_DEVICE", 409)
+    except LookupError as exc:
+        return error(str(exc), "VEHICLE_NOT_FOUND", 404)
+    except RuntimeError as exc:
+        return error(str(exc), "DEVICE_VEHICLE_CONFLICT", 409)
 
 
 @devices_bp.put("/devices/<device_id>")
 def update_device(device_id):
     if not device_service.get_device(device_id):
         return error("Device not found", "DEVICE_NOT_FOUND", 404)
-    return success(device_service.update_device(device_id, request.get_json(silent=True) or {}), "Device updated successfully")
+    try:
+        return success(device_service.update_device(device_id, request.get_json(silent=True) or {}), "Device updated successfully")
+    except LookupError as exc:
+        return error(str(exc), "VEHICLE_NOT_FOUND", 404)
+    except RuntimeError as exc:
+        return error(str(exc), "DEVICE_VEHICLE_CONFLICT", 409)
+    except ValueError as exc:
+        return error(str(exc), "INVALID_DEVICE_UPDATE")
 
 
 @devices_bp.delete("/devices/<device_id>")

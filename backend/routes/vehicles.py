@@ -44,7 +44,27 @@ def create_vehicle():
 def update_vehicle(vehicle_id):
     if not vehicle_service.get_vehicle(vehicle_id):
         return error("Vehicle not found", "VEHICLE_NOT_FOUND", 404)
-    return success(vehicle_service.update_vehicle(vehicle_id, request.get_json(silent=True) or {}), "Vehicle updated successfully")
+    try:
+        return success(vehicle_service.update_vehicle(vehicle_id, request.get_json(silent=True) or {}), "Vehicle updated successfully")
+    except ValueError as exc:
+        return error(str(exc), "INVALID_VEHICLE_UPDATE")
+
+
+@vehicles_bp.put("/vehicles/<vehicle_id>/site")
+def assign_vehicle_to_site(vehicle_id):
+    data = request.get_json(silent=True) or {}
+    missing = missing_fields(data, ["site_id"])
+    if missing:
+        return error(f"Missing required fields: {', '.join(missing)}", "MISSING_FIELDS")
+    try:
+        vehicle = vehicle_service.assign_vehicle_to_site(vehicle_id, data["site_id"])
+        return success(vehicle, "Vehicle assigned to construction site")
+    except LookupError as exc:
+        return error(str(exc), "REFERENCE_NOT_FOUND", 404)
+    except RuntimeError as exc:
+        return error(str(exc), "RESOURCE_BUSY", 409)
+    except ValueError as exc:
+        return error(str(exc), "INVALID_ASSIGNMENT")
 
 
 @vehicles_bp.delete("/vehicles/<vehicle_id>")

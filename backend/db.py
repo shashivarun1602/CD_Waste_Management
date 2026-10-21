@@ -14,6 +14,7 @@ COLLECTIONS = (
     "transport_records",
     "gps_tracking",
     "devices",
+    "device_assignments",
     "weight_readings",
     "counters",
 )

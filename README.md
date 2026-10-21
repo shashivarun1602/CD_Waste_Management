@@ -33,7 +33,7 @@ python backend\seed.py
 
 ## Collections
 
-`construction_sites`, `vehicles`, `drivers`, `facilities`, `waste_records`, `transport_records`, `gps_tracking`, `devices`, and `weight_readings` are created/indexed by the backend. The internal `counters` collection generates permanent IDs. GPS and weight histories remain separate records associated with their resolved transport.
+`construction_sites`, `vehicles`, `drivers`, `facilities`, `waste_records`, `transport_records`, `gps_tracking`, `devices`, `device_assignments`, and `weight_readings` are used by the backend. The internal `counters` collection generates permanent IDs. GPS and weight histories remain separate records associated with their resolved transport.
 
 ## API
 
@@ -41,6 +41,7 @@ All responses use `{ "success": true, "message": "...", "data": ... }` or the ma
 
 - `GET|POST /api/sites`, `GET|PUT|DELETE /api/sites/<site_id>`
 - `GET|POST /api/vehicles`, `GET|PUT|DELETE /api/vehicles/<vehicle_id>`, `GET /api/vehicles/<vehicle_id>/history`
+- `PUT /api/vehicles/<vehicle_id>/site` with `{ "site_id": "CON-0002" }` assigns or reassigns an eligible vehicle to an active site. It returns `409` while an active transport exists. Completing a verified transport still releases the site assignment.
 - `GET|POST /api/drivers`, `GET|PUT|DELETE /api/drivers/<driver_id>`
 - `GET|POST /api/facilities`, `GET|PUT|DELETE /api/facilities/<facility_id>`
 - `GET|POST /api/waste`, `GET|PUT|DELETE /api/waste/<waste_id>`
@@ -53,6 +54,8 @@ All responses use `{ "success": true, "message": "...", "data": ... }` or the ma
 - `GET /api/dashboard`, `GET /health`
 
 Transport status is enforced as `Created -> Loaded -> In Transit -> Arrived -> Verified -> Completed`. A weight mismatch is marked `Mismatch` and cannot be completed automatically.
+
+Vehicle site assignment is stored on the vehicle; each transport keeps its original `site_id` and `vehicle_id`. Vehicle document updates atomically reserve an active transport, preventing concurrent API requests from creating multiple active transports for that vehicle. Device assignments are immutable through generic device updates and guarded by paired `device_assignments` registry claims keyed by MongoDB's unique `_id`; existing device records are not rewritten automatically. Before enabling assignments on an existing database, inspect duplicate `devices.device_id` and `devices.vehicle_id` values, resolve conflicts manually, then backfill one `device:<device_id>` and one `vehicle:<vehicle_id>` registry row per existing device and set the corresponding vehicle `device_id`. Do not build a unique index on `devices.vehicle_id` until that inspection and cleanup are complete.
 
 ## ESP32 Phase 1 Prototype
 

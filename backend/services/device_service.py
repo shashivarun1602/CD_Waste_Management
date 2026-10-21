@@ -1,7 +1,10 @@
 from datetime import datetime, timezone
 
+from pymongo.errors import DuplicateKeyError
+
 from config import Config
 from services.common import collection, create_document, get_document, list_documents, now, soft_delete, update_document
+from utils.id_generator import generate_id
 
 COLLECTION = "devices"
 FIELD = "device_id"
@@ -50,15 +53,65 @@ def get_device(device_id):
 
 def create_device(data):
     data = dict(data)
-    requested_device_id = data.pop("device_id", None)
+    requested_device_id = data.pop("device_id", None) or generate_id("ESP")
+    vehicle_id = data.get("vehicle_id")
+    if not collection("vehicles").find_one({"vehicle_id": vehicle_id}):
+        raise LookupError("Vehicle not found")
+    if collection(COLLECTION).find_one({"device_id": requested_device_id}):
+        raise RuntimeError("Device ID is already registered")
+    if collection(COLLECTION).find_one({"vehicle_id": vehicle_id}):
+        raise RuntimeError("Vehicle already has a device assigned")
+
+    assignments = collection("device_assignments")
+    device_claim = {"_id": f"device:{requested_device_id}", "device_id": requested_device_id, "vehicle_id": vehicle_id}
+    vehicle_claim = {"_id": f"vehicle:{vehicle_id}", "device_id": requested_device_id, "vehicle_id": vehicle_id}
+    try:
+        assignments.insert_one(device_claim)
+        try:
+            assignments.insert_one(vehicle_claim)
+        except DuplicateKeyError:
+            assignments.delete_one({"_id": device_claim["_id"]})
+            raise
+    except DuplicateKeyError as exc:
+        raise RuntimeError("Device or vehicle already has an assigned device") from exc
+
+    claimed = collection("vehicles").update_one(
+        {
+            "vehicle_id": vehicle_id,
+            "$or": [{"device_id": {"$exists": False}}, {"device_id": None}],
+        },
+        {"$set": {"device_id": requested_device_id, "updated_at": now()}},
+    )
+    if not claimed.matched_count:
+        assignments.delete_one({"_id": device_claim["_id"]})
+        assignments.delete_one({"_id": vehicle_claim["_id"]})
+        raise RuntimeError("Vehicle already has a device assigned")
+
     data.setdefault("status", "active")
     data.setdefault("device_type", "ESP32")
     data.setdefault("last_seen", None)
-    return create_document(COLLECTION, FIELD, "ESP", data, identifier=requested_device_id)
+    try:
+        return create_document(COLLECTION, FIELD, "ESP", data, identifier=requested_device_id)
+    except Exception:
+        collection("vehicles").update_one(
+            {"vehicle_id": vehicle_id, "device_id": requested_device_id},
+            {"$unset": {"device_id": ""}},
+        )
+        assignments.delete_one({"_id": device_claim["_id"]})
+        assignments.delete_one({"_id": vehicle_claim["_id"]})
+        raise
 
 
 def update_device(device_id, data):
-    return update_document(COLLECTION, FIELD, device_id, data)
+    updates = dict(data)
+    new_vehicle_id = updates.pop("vehicle_id", None)
+    updates.pop("device_id", None)
+    current = get_device(device_id)
+    if not current:
+        return None
+    if new_vehicle_id is not None and new_vehicle_id != current.get("vehicle_id"):
+        raise ValueError("Device vehicle assignment cannot be changed after registration")
+    return update_document(COLLECTION, FIELD, device_id, updates)
 
 
 def deactivate_device(device_id):

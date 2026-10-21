@@ -1,6 +1,9 @@
+from pymongo import ReturnDocument
+
 from services.common import collection, create_document, get_document, list_documents, now, update_document
 from services.gps_service import latest_gps_point
 from services.verification_service import verify_weights
+from utils.id_generator import generate_id
 
 COLLECTION = "transport_records"
 FIELD = "transport_id"
@@ -66,11 +69,49 @@ def create_transport(data):
         active_query = {"status": {"$in": list(ACTIVE_STATUSES)}, "$or": [{"vehicle_id": data["vehicle_id"]}, {"driver_id": data["driver_id"]}]}
     if collection(COLLECTION).find_one(active_query):
         raise RuntimeError("Vehicle or driver is already assigned to an active transport")
+
+    vehicle_id = data["vehicle_id"]
+    vehicle = _reference_exists("vehicles", "vehicle_id", vehicle_id)
+    if vehicle.get("status") not in {"Available", "Assigned"}:
+        raise ValueError("Vehicle is not eligible for a transport")
+    current_site_id = vehicle.get("current_site_id")
+    if current_site_id and current_site_id != data["site_id"]:
+        raise ValueError("Vehicle is assigned to another site; reassign it before creating this transport")
+    if vehicle.get("active_transport_id"):
+        raise RuntimeError("Vehicle is already assigned to an active transport")
+
     data = dict(data)
     data.update({"status": "Created", "source": data.get("source", "manual"), "loaded_weight_kg": None, "received_weight_kg": None, "weight_difference_kg": None, "difference_percentage": None, "weight_status": "Pending", "started_at": None, "arrived_at": None, "verified_at": None, "completed_at": None})
-    transport = create_document(COLLECTION, FIELD, "TRN", data)
+    transport_id = generate_id("TRN")
     timestamp = now()
-    collection("vehicles").update_one({"vehicle_id": data["vehicle_id"]}, {"$set": {"status": "Assigned", "current_site_id": data["site_id"], "updated_at": timestamp}})
+    reservation = collection("vehicles").find_one_and_update(
+        {
+            "vehicle_id": vehicle_id,
+            "status": {"$in": ["Available", "Assigned"]},
+            "active_transport_id": {"$in": [None]},
+            "$or": [{"current_site_id": None}, {"current_site_id": data["site_id"]}],
+        },
+        {"$set": {"status": "Assigned", "current_site_id": data["site_id"], "active_transport_id": transport_id, "updated_at": timestamp}},
+        return_document=ReturnDocument.BEFORE,
+    )
+    if not reservation:
+        raise RuntimeError("Vehicle or driver is already assigned to an active transport")
+
+    try:
+        transport = create_document(COLLECTION, FIELD, "TRN", data, identifier=transport_id)
+    except Exception:
+        restore = {"status": reservation.get("status", "Available"), "updated_at": now()}
+        unset = {"active_transport_id": ""}
+        if "current_site_id" in reservation:
+            restore["current_site_id"] = reservation["current_site_id"]
+        else:
+            unset["current_site_id"] = ""
+        collection("vehicles").update_one(
+            {"vehicle_id": vehicle_id, "active_transport_id": transport_id},
+            {"$set": restore, "$unset": unset},
+        )
+        raise
+
     if data.get("driver_id"):
         collection("drivers").update_one({"driver_id": data["driver_id"]}, {"$set": {"status": "Assigned", "updated_at": timestamp}})
     return transport
@@ -95,7 +136,16 @@ def _change_status(transport_id, next_status, updates=None):
         updates["verified_at"] = now()
     elif next_status == "Completed":
         updates["completed_at"] = now()
-        collection("vehicles").update_one({"vehicle_id": transport["vehicle_id"]}, {"$set": {"status": "Available", "current_site_id": None, "updated_at": now()}})
+        collection("vehicles").update_one(
+            {
+                "vehicle_id": transport["vehicle_id"],
+                "$or": [
+                    {"active_transport_id": transport_id},
+                    {"active_transport_id": None, "current_site_id": transport.get("site_id")},
+                ],
+            },
+            {"$set": {"status": "Available", "current_site_id": None, "updated_at": now()}, "$unset": {"active_transport_id": ""}},
+        )
         if transport.get("driver_id"):
             collection("drivers").update_one({"driver_id": transport["driver_id"]}, {"$set": {"status": "Available", "updated_at": now()}})
     return update_document(COLLECTION, FIELD, transport_id, updates)
