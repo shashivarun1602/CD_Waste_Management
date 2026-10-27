@@ -37,6 +37,8 @@ def create_device():
         return error(str(exc), "VEHICLE_NOT_FOUND", 404)
     except RuntimeError as exc:
         return error(str(exc), "DEVICE_VEHICLE_CONFLICT", 409)
+    except ValueError as exc:
+        return error(str(exc), "INVALID_DEVICE_ASSIGNMENT")
 
 
 @devices_bp.put("/devices/<device_id>")

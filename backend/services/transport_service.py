@@ -37,7 +37,11 @@ def get_transport(transport_id):
     if transport:
         transport["latest_gps"] = latest_gps_point(transport_id)
         transport["gps_history"] = list_documents("gps_tracking", {"transport_id": transport_id}, "timestamp")
-        transport["weight_history"] = list_documents("weight_readings", {"transport_id": transport_id}, "timestamp")
+        transport["latest_sensor_reading"] = collection("weight_readings").find_one(
+            {"transport_id": transport_id},
+            {"_id": 0, "raw_value": 1, "calibration_status": 1, "weight_kg": 1, "timestamp": 1},
+            sort=[("timestamp", -1)],
+        )
         device = collection("devices").find_one({"vehicle_id": transport.get("vehicle_id")}, {"_id": 0, "device_id": 1})
         transport["device_id"] = device.get("device_id") if device else None
     return transport
@@ -164,6 +168,45 @@ def arrive_transport(transport_id, received_weight_kg=None, source="manual", dev
     return _change_status(transport_id, "Arrived", updates)
 
 
+def _latest_calibrated_reading(transport_id):
+    reading = collection("weight_readings").find_one(
+        {"transport_id": transport_id, "weight_kg": {"$gt": 0}, "calibration_status": "SET"},
+        {"_id": 0, "device_id": 1, "weight_kg": 1},
+        sort=[("timestamp", -1)],
+    )
+    if not reading:
+        raise ValueError("No calibrated sensor weight is available to capture")
+    return reading
+
+
+def capture_loaded_weight(transport_id):
+    transport = collection(COLLECTION).find_one({FIELD: transport_id})
+    if not transport:
+        raise LookupError("Transport not found")
+    if transport.get("loaded_weight_kg") is not None:
+        raise ValueError("Official loaded weight has already been captured")
+    reading = _latest_calibrated_reading(transport_id)
+    return load_transport(transport_id, reading["weight_kg"], "device", reading.get("device_id"))
+
+
+def capture_received_weight(transport_id):
+    transport = collection(COLLECTION).find_one({FIELD: transport_id})
+    if not transport:
+        raise LookupError("Transport not found")
+    if transport.get("status") not in {"In Transit", "Arrived"}:
+        raise ValueError("Received weight can only be captured for an in-transit or arrived transport")
+    if transport.get("received_weight_kg") is not None:
+        raise ValueError("Official received weight has already been captured")
+    reading = _latest_calibrated_reading(transport_id)
+    if transport.get("status") == "In Transit":
+        return arrive_transport(transport_id, reading["weight_kg"], "device", reading.get("device_id"))
+    return update_document(COLLECTION, FIELD, transport_id, {
+        "received_weight_kg": reading["weight_kg"],
+        "received_weight_source": "device",
+        "received_device_id": reading.get("device_id"),
+    })
+
+
 def verify_transport(transport_id):
     transport = collection(COLLECTION).find_one({FIELD: transport_id})
     if not transport:
@@ -183,6 +226,87 @@ def complete_transport(transport_id):
     if transport.get("weight_status") != "Verified":
         raise ValueError("Only verified transports can be completed")
     return _change_status(transport_id, "Completed")
+
+
+def close_mismatch_transport(transport_id, reason):
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValueError("A mismatch review reason is required")
+    reason = reason.strip()
+    if len(reason) > 500:
+        raise ValueError("Mismatch review reason must be 500 characters or fewer")
+
+    transport = collection(COLLECTION).find_one({FIELD: transport_id})
+    if not transport:
+        raise LookupError("Transport not found")
+    if transport.get("status") != "Mismatch" or transport.get("weight_status") != "Mismatch":
+        raise ValueError("Only transports with a verified mismatch can be closed")
+    loaded_weight = transport.get("loaded_weight_kg")
+    received_weight = transport.get("received_weight_kg")
+    if loaded_weight is None or received_weight is None:
+        raise ValueError("Loaded and received weights are required to close a mismatch")
+    if verify_weights(loaded_weight, received_weight)["weight_status"] != "Mismatch":
+        raise ValueError("Recorded weights do not satisfy the mismatch verification requirements")
+
+    vehicle = collection("vehicles").find_one({"vehicle_id": transport.get("vehicle_id")})
+    if not vehicle or vehicle.get("active_transport_id") != transport_id:
+        raise ValueError("Vehicle is no longer assigned to this transport")
+
+    closed_at = now()
+    closed = collection(COLLECTION).update_one(
+        {
+            FIELD: transport_id,
+            "status": "Mismatch",
+            "weight_status": "Mismatch",
+            "loaded_weight_kg": loaded_weight,
+            "received_weight_kg": received_weight,
+            "$or": [{"mismatch_closed_at": {"$exists": False}}, {"mismatch_closed_at": None}],
+        },
+        {
+            "$set": {
+                "status": "Closed",
+                "mismatch_closed_from_status": "Mismatch",
+                "mismatch_closure_reason": reason,
+                "mismatch_reviewed_at": closed_at,
+                "mismatch_closed_at": closed_at,
+                "updated_at": closed_at,
+            }
+        },
+    )
+    if not closed.matched_count:
+        raise ValueError("Mismatch transport was changed or already closed")
+
+    released = collection("vehicles").update_one(
+        {"vehicle_id": transport["vehicle_id"], "active_transport_id": transport_id},
+        {
+            "$set": {"status": "Available", "current_site_id": None, "updated_at": now()},
+            "$unset": {"active_transport_id": ""},
+        },
+    )
+    if not released.matched_count:
+        collection(COLLECTION).update_one(
+            {
+                FIELD: transport_id,
+                "status": "Closed",
+                "mismatch_closed_at": closed_at,
+            },
+            {
+                "$set": {"status": "Mismatch", "updated_at": now()},
+                "$unset": {
+                    "mismatch_closed_from_status": "",
+                    "mismatch_closure_reason": "",
+                    "mismatch_reviewed_at": "",
+                    "mismatch_closed_at": "",
+                },
+            },
+        )
+        raise RuntimeError("Vehicle assignment changed; mismatch closure was not completed")
+
+    if transport.get("driver_id"):
+        collection("drivers").update_one(
+            {"driver_id": transport["driver_id"]},
+            {"$set": {"status": "Available", "updated_at": now()}},
+        )
+    return get_document(COLLECTION, FIELD, transport_id)
 
 
 def record_weight(transport_id, data):

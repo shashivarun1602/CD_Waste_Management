@@ -11,7 +11,11 @@ A software-only Flask and MongoDB MVP for tracking construction and demolition w
 - MongoDB database: `cd_waste_management`
 - Hardware simulation: the dashboard sends simulated ESP32 data through `/api/device/gps` and `/api/device/weight`.
 
-Manual data remains supported. Device GPS and weight requests resolve `Device -> Vehicle -> Active Transport` on the server, so the client cannot assign readings to an arbitrary transport. No physical ESP32, HX711, GPS, or load-cell hardware is required for the demonstration.
+Manual data remains supported. Device GPS and weight requests resolve `Device -> assigned Vehicle -> unique active Transport -> active Construction Site and authorized Facility` on the server, so clients cannot route readings to arbitrary records. A device remains configured with its permanent device ID across transport changes and vehicle reassignment. No physical ESP32, HX711, GPS, or load-cell hardware is required for the demonstration.
+
+Every device weight upload is retained as a sensor-history reading for diagnostics, but uploads do not set or replace the transport's official loaded or received weight. Use the transport detail page's explicit **Capture site-loading weight** and **Capture facility-received weight** actions to record the latest calibrated sensor reading as an official weight. The detail page shows those official weights, verification results, and the latest sensor reading without displaying the full sensor history.
+
+Transports with a verified weight mismatch remain active until an operator explicitly closes them from the transport detail page with a review reason. Closure preserves the original weights and `Mismatch` verification result, records the review/closure timestamps, and releases the vehicle only if it is still assigned to that transport. A closed mismatch is retained in transport history and is not marked `Verified` or `Completed`.
 
 ## Setup
 
@@ -47,15 +51,15 @@ All responses use `{ "success": true, "message": "...", "data": ... }` or the ma
 - `GET|POST /api/waste`, `GET|PUT|DELETE /api/waste/<waste_id>`
 - `GET|POST /api/transports`, `GET /api/transports/<transport_id>`
 - `POST /api/transports/<transport_id>/load|start|arrive|verify|complete|weight`
-- `GET|POST /api/gps`, `GET /api/gps?transport_id=TRN-0001`
+- `GET|POST /api/gps`, `GET /api/gps?transport_id=<transport_id>`
 - `GET|POST /api/devices`, `GET|PUT|DELETE /api/devices/<device_id>`
-- `POST /api/device/gps`, `POST /api/device/weight`, `GET /api/device/weight?transport_id=TRN-0001`
+- `POST /api/device/gps`, `POST /api/device/weight`, `GET /api/device/weight?transport_id=<transport_id>`
 - `GET /api/facilities/recommend?waste_type=Concrete&latitude=17.385&longitude=78.4867`
 - `GET /api/dashboard`, `GET /health`
 
 Transport status is enforced as `Created -> Loaded -> In Transit -> Arrived -> Verified -> Completed`. A weight mismatch is marked `Mismatch` and cannot be completed automatically.
 
-Vehicle site assignment is stored on the vehicle; each transport keeps its original `site_id` and `vehicle_id`. Vehicle document updates atomically reserve an active transport, preventing concurrent API requests from creating multiple active transports for that vehicle. Device assignments are immutable through generic device updates and guarded by paired `device_assignments` registry claims keyed by MongoDB's unique `_id`; existing device records are not rewritten automatically. Before enabling assignments on an existing database, inspect duplicate `devices.device_id` and `devices.vehicle_id` values, resolve conflicts manually, then backfill one `device:<device_id>` and one `vehicle:<vehicle_id>` registry row per existing device and set the corresponding vehicle `device_id`. Do not build a unique index on `devices.vehicle_id` until that inspection and cleanup are complete.
+Vehicle site assignment is stored on the vehicle; each transport keeps its original `site_id` and `vehicle_id`. Vehicle document updates atomically reserve an active transport, preventing concurrent API requests from creating multiple active transports for that vehicle. Devices have a permanent `device_id` and can be reassigned to an unclaimed vehicle through `PUT /api/devices/<device_id>` with `{"vehicle_id":"VEH-0002"}`. Reassignment updates the one-to-one `device_assignments` claims and vehicle references while leaving transport and telemetry history unchanged. Existing duplicate device/vehicle assignments must be resolved before reassignment is enabled on an existing database.
 
 ## ESP32 Phase 1 Prototype
 
@@ -66,16 +70,17 @@ DEVICE_API_TOKEN=replace-with-a-long-random-local-demo-token
 DEVICE_ONLINE_WINDOW_SECONDS=90
 ```
 
-The device telemetry routes require that value in the `X-Device-Token` header. This shared token is for a trusted local prototype, not production authentication. Register the hardware ID against its vehicle, for example `POST /api/devices` with `{"device_id":"DEV-0001","vehicle_id":"VEH-0001"}`. Set the active trip ID and the same token in `firmware/esp32/esp32_waste_monitor.ino`.
+The device telemetry routes require that value in the `X-Device-Token` header. This shared token is for a trusted local prototype, not production authentication. Register the hardware ID against its vehicle, for example `POST /api/devices` with `{"device_id":"DEV-0002","vehicle_id":"VEH-0001"}`. Set the permanent device ID and the same token in `firmware/esp32/esp32_waste_monitor.ino`; the firmware does not contain a vehicle, site, facility, or transport ID.
 
 The sketch posts GPS to `/api/device/gps` and raw HX711 counts to `/api/device/weight`. Raw readings use `calibration_status: "NOT_SET"` and `weight_kg: null`; they do not update transport kilogram weights. Existing calibrated `weight_kg` requests remain supported.
+
+The server resolves the device's current vehicle assignment and its single active transport. Telemetry requests must not include assignment fields (`vehicle_id`, `transport_id`, `site_id`, or `facility_id`); ambiguous, inconsistent, closed, or incomplete assignments are rejected.
 
 Example GPS request:
 
 ```json
 {
-	"device_id": "DEV-0001",
-	"transport_id": "TRN-0001",
+	"device_id": "DEV-0002",
 	"latitude": 17.385,
 	"longitude": 78.4867,
 	"satellites": 8,
@@ -89,8 +94,7 @@ Example raw HX711 request:
 
 ```json
 {
-	"device_id": "DEV-0001",
-	"transport_id": "TRN-0001",
+	"device_id": "DEV-0002",
 	"raw_value": -209177,
 	"calibration_status": "NOT_SET",
 	"weight_kg": null,
@@ -98,7 +102,7 @@ Example raw HX711 request:
 }
 ```
 
-Send both requests with `X-Device-Token: <DEVICE_API_TOKEN>`. The transport ID must be an active trip belonging to the device's assigned vehicle. If a GPS fix is unavailable, send `gps_fix: false` with null coordinates; no route origin is created from that point.
+Send both requests with `X-Device-Token: <DEVICE_API_TOKEN>`. If a GPS fix is unavailable, send `gps_fix: false` with null coordinates; no route origin is created from that point.
 
 Flask already binds to `0.0.0.0` on `PORT` (5000 by default). Find the computer's Wi-Fi IPv4 address with `ipconfig`, set `FLASK_BASE_URL` in the sketch to `http://<computer-lan-ip>:5000`, and allow that port through the local firewall. Do not use `localhost` in the sketch.
 

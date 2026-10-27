@@ -11,9 +11,8 @@
 const char *WIFI_SSID = "YOUR_WIFI_SSID";
 const char *WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
 const char *FLASK_BASE_URL = "http://192.168.1.10:5000";
-const char *DEVICE_ID = "DEV-0001";
+const char *DEVICE_ID = "DEV-0002";
 const char *DEVICE_API_TOKEN = "REPLACE_WITH_DEVICE_API_TOKEN";
-const char *TRANSPORT_ID = "TRN-0001";
 
 constexpr int GPS_RX_PIN = 25;
 constexpr int GPS_TX_PIN = 26;
@@ -86,7 +85,6 @@ void sendGps() {
 
   StaticJsonDocument<384> payload;
   payload["device_id"] = DEVICE_ID;
-  payload["transport_id"] = TRANSPORT_ID;
   payload["gps_fix"] = hasFix;
   payload["satellites"] = satellites;
   payload["timestamp"] = timestampUtc();
@@ -112,7 +110,6 @@ void sendRawWeight() {
 
   StaticJsonDocument<320> payload;
   payload["device_id"] = DEVICE_ID;
-  payload["transport_id"] = TRANSPORT_ID;
   payload["raw_value"] = latestRawValue;
   payload["calibration_status"] = "NOT_SET";
   payload["weight_kg"] = nullptr;
@@ -129,7 +126,7 @@ void updateDisplay() {
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(0, 0);
   display.printf("%s  %s\n", DEVICE_ID, WiFi.status() == WL_CONNECTED ? "ONLINE" : "OFFLINE");
-  display.printf("Trip: %s\n", TRANSPORT_ID);
+  display.println("Transport: server");
   if (gps.location.isValid() && gps.location.age() < 3000) {
     display.printf("GPS FIX  SAT: %u\n", gps.satellites.isValid() ? gps.satellites.value() : 0);
     display.printf("%.5f\n%.5f\n", gps.location.lat(), gps.location.lng());

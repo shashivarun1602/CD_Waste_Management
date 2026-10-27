@@ -33,11 +33,10 @@ class DeviceTelemetryRouteTest(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
 
     @patch("routes.device_data.gps_service.add_device_gps_point")
-    def test_gps_route_forwards_device_transport_and_fix_metadata(self, add_point):
+    def test_gps_route_forwards_device_and_fix_metadata_without_client_assignment(self, add_point):
         add_point.return_value = {"tracking_id": "GPS-0001"}
         payload = {
             "device_id": "DEV-0001",
-            "transport_id": "TRN-0001",
             "latitude": 17.385,
             "longitude": 78.4867,
             "satellites": 8,
@@ -49,16 +48,32 @@ class DeviceTelemetryRouteTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         forwarded = add_point.call_args.args[0]
-        self.assertEqual(forwarded["transport_id"], "TRN-0001")
+        self.assertNotIn("transport_id", forwarded)
         self.assertEqual(forwarded["satellites"], 8)
         self.assertEqual(forwarded["source"], "device")
+
+    def test_device_routes_reject_client_supplied_assignment_fields(self):
+        response = self.api.post(
+            "/api/device/gps",
+            json={"device_id": "DEV-0001", "transport_id": "TRN-0001", "latitude": 17, "longitude": 78},
+            headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["error"], "CLIENT_ASSIGNMENT_NOT_ALLOWED")
+
+        response = self.api.post(
+            "/api/device/weight",
+            json={"device_id": "DEV-0001", "vehicle_id": "VEH-0001", "raw_value": 12},
+            headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["error"], "CLIENT_ASSIGNMENT_NOT_ALLOWED")
 
     @patch("routes.device_data.weight_service.add_device_weight")
     def test_raw_weight_is_not_converted_to_kilograms(self, add_weight):
         add_weight.return_value = {"weight_kg": None, "raw_value": -209177}
         payload = {
             "device_id": "DEV-0001",
-            "transport_id": "TRN-0001",
             "raw_value": -209177,
             "calibration_status": "NOT_SET",
             "weight_kg": None,
@@ -74,16 +89,25 @@ class DeviceTelemetryRouteTest(unittest.TestCase):
         self.assertIsNone(forwarded["weight_kg"])
 
     @patch("routes.device_data.weight_service.add_device_weight")
-    def test_existing_calibrated_weight_payload_is_preserved(self, add_weight):
+    def test_calibrated_weight_payload_without_transport_is_preserved(self, add_weight):
         add_weight.return_value = {"weight_kg": 8420}
         response = self.api.post(
             "/api/device/weight",
-            json={"device_id": "DEV-0001", "weight_kg": 8420},
+            json={
+                "device_id": "DEV-0001",
+                "raw_value": 842000,
+                "calibration_status": "SET",
+                "weight_kg": 8420,
+            },
             headers=self.headers,
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(add_weight.call_args.args[0]["weight_kg"], 8420.0)
+        forwarded = add_weight.call_args.args[0]
+        self.assertEqual(forwarded["raw_value"], 842000)
+        self.assertEqual(forwarded["calibration_status"], "SET")
+        self.assertEqual(forwarded["weight_kg"], 8420.0)
+        self.assertNotIn("transport_id", forwarded)
 
     def test_raw_value_cannot_be_marked_calibrated_without_kilograms(self):
         response = self.api.post(
@@ -97,26 +121,51 @@ class DeviceTelemetryRouteTest(unittest.TestCase):
         with patch("services.device_service.collection") as collection:
             collection.return_value.find_one.return_value = None
             with self.assertRaises(LookupError):
-                resolve_device_transport("DEV-MISSING", "TRN-0001")
+                resolve_device_transport("DEV-MISSING")
 
     def test_resolver_rejects_inactive_device_without_database(self):
         devices = Mock()
         devices.find_one.return_value = {"device_id": "DEV-0001", "status": "inactive"}
         with patch("services.device_service.collection", return_value=devices):
             with self.assertRaises(ValueError):
-                resolve_device_transport("DEV-0001", "TRN-0001")
+                resolve_device_transport("DEV-0001")
 
     def test_resolver_rejects_transport_assigned_to_another_vehicle(self):
         devices = Mock()
-        devices.find_one.return_value = {"device_id": "DEV-0001", "vehicle_id": "VEH-0001", "status": "active"}
+        devices.find_one.side_effect = [
+            {"device_id": "DEV-0001", "vehicle_id": "VEH-0001", "status": "active"},
+            None,
+        ]
         vehicles = Mock()
-        vehicles.find_one.return_value = {"vehicle_id": "VEH-0001"}
+        vehicles.find_one.return_value = {
+            "vehicle_id": "VEH-0001",
+            "device_id": "DEV-0001",
+            "active_transport_id": "TRN-0002",
+            "current_site_id": "CON-0001",
+        }
         transports = Mock()
-        transports.find_one.side_effect = [None, {"transport_id": "TRN-0002", "vehicle_id": "VEH-0002"}]
-        collections = {"devices": devices, "vehicles": vehicles, "transport_records": transports}
+        transports.find.return_value = [{
+            "transport_id": "TRN-0002",
+            "vehicle_id": "VEH-0002",
+            "site_id": "CON-0001",
+            "facility_id": "FAC-0001",
+            "status": "Created",
+        }]
+        sites = Mock()
+        facilities = Mock()
+        assignments = Mock()
+        assignments.find_one.return_value = None
+        collections = {
+            "devices": devices,
+            "vehicles": vehicles,
+            "transport_records": transports,
+            "construction_sites": sites,
+            "facilities": facilities,
+            "device_assignments": assignments,
+        }
         with patch("services.device_service.collection", side_effect=collections.__getitem__):
             with self.assertRaises(ValueError):
-                resolve_device_transport("DEV-0001", "TRN-0002")
+                resolve_device_transport("DEV-0001")
 
     def test_online_status_uses_recent_server_heartbeat(self):
         recent = datetime.now(timezone.utc).isoformat()
@@ -139,7 +188,6 @@ class DeviceTelemetryRouteTest(unittest.TestCase):
 
         result = add_device_weight({
             "device_id": "DEV-0001",
-            "transport_id": "TRN-0001",
             "raw_value": -209177,
             "calibration_status": "NOT_SET",
             "weight_kg": None,
@@ -151,8 +199,41 @@ class DeviceTelemetryRouteTest(unittest.TestCase):
         self.assertIsNone(stored_reading["weight_kg"])
         updates = transport_collection.update_one.call_args.args[1]["$set"]
         self.assertNotIn("loaded_weight_kg", updates)
+        self.assertNotIn("received_weight_kg", updates)
         self.assertNotIn("status", updates)
         self.assertIsNone(result["weight_kg"])
+        touch.assert_called_once()
+
+    @patch("services.weight_service.touch_device")
+    @patch("services.weight_service.collection")
+    @patch("services.weight_service.create_document", return_value={"reading_id": "WGT-0002"})
+    @patch("services.weight_service.resolve_device_transport")
+    def test_calibrated_sensor_readings_never_change_official_weights(self, resolve, create, collection, touch):
+        resolve.return_value = (
+            {"device_id": "DEV-0001"},
+            {"vehicle_id": "VEH-0001"},
+            {"transport_id": "TRN-0001", "status": "Arrived"},
+        )
+        transport_collection = Mock()
+        collection.return_value = transport_collection
+
+        result = add_device_weight({
+            "device_id": "DEV-0001",
+            "raw_value": 842000,
+            "calibration_status": "SET",
+            "weight_kg": 8420,
+        })
+
+        self.assertEqual(create.call_args.args[0], "weight_readings")
+        self.assertEqual(create.call_args.args[3]["transport_id"], "TRN-0001")
+        self.assertEqual(create.call_args.args[3]["weight_kg"], 8420)
+        self.assertEqual(result["weight_kg"], 8420)
+        self.assertEqual(result["transport_id"], "TRN-0001")
+        updates = transport_collection.update_one.call_args.args[1]["$set"]
+        self.assertEqual(updates["latest_weight_kg"], 8420)
+        self.assertNotIn("loaded_weight_kg", updates)
+        self.assertNotIn("received_weight_kg", updates)
+        self.assertNotIn("status", updates)
         touch.assert_called_once()
 
 

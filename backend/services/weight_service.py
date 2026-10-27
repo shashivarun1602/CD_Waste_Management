@@ -3,7 +3,7 @@ from services.device_service import resolve_device_transport, touch_device
 
 
 def add_device_weight(data):
-    device, vehicle, transport = resolve_device_transport(data["device_id"], data.get("transport_id"))
+    device, vehicle, transport = resolve_device_transport(data["device_id"])
     weight = float(data["weight_kg"]) if data.get("weight_kg") is not None else None
     timestamp = data.get("timestamp") or now()
     reading = create_document("weight_readings", "reading_id", "WGT", {
@@ -19,10 +19,6 @@ def add_device_weight(data):
     updates = {"latest_raw_value": data.get("raw_value"), "latest_reading_at": timestamp, "updated_at": now()}
     if weight is not None:
         updates.update({"latest_weight_kg": weight, "latest_weight_at": timestamp})
-        if transport.get("status") == "Created":
-            updates.update({"status": "Loaded", "loaded_weight_kg": weight, "weight_source": "device", "device_id": device["device_id"]})
-        elif transport.get("status") == "Arrived":
-            updates.update({"received_weight_kg": weight, "received_weight_source": "device", "received_device_id": device["device_id"]})
     collection("transport_records").update_one({"transport_id": transport["transport_id"]}, {"$set": updates})
     received_at = now()
     touch_device(device["device_id"], received_at)

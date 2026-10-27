@@ -23,7 +23,7 @@ def latest_gps_point(transport_id):
 
 def add_device_gps_point(data):
     device_id = data["device_id"]
-    device, vehicle, transport = resolve_device_transport(device_id, data.get("transport_id"))
+    device, vehicle, transport = resolve_device_transport(device_id)
     latitude = float(data["latitude"]) if data.get("latitude") is not None else None
     longitude = float(data["longitude"]) if data.get("longitude") is not None else None
     timestamp = data.get("timestamp") or now()

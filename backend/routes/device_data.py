@@ -6,6 +6,17 @@ from utils.response import error, success
 from utils.validators import missing_fields, positive_number
 
 device_data_bp = Blueprint("device_data", __name__)
+ASSIGNMENT_FIELDS = {"vehicle_id", "transport_id", "site_id", "facility_id"}
+
+
+def _reject_client_assignments(data):
+    supplied = sorted(ASSIGNMENT_FIELDS.intersection(data))
+    if supplied:
+        return error(
+            f"Device assignments are resolved by the server; do not send: {', '.join(supplied)}",
+            "CLIENT_ASSIGNMENT_NOT_ALLOWED",
+        )
+    return None
 
 
 @device_data_bp.post("/device/gps")
@@ -15,6 +26,9 @@ def device_gps():
         return error(*auth_error)
 
     data = request.get_json(silent=True) or {}
+    assignment_error = _reject_client_assignments(data)
+    if assignment_error:
+        return assignment_error
     missing = missing_fields(data, ["device_id"])
     if missing:
         return error(f"Missing required fields: {', '.join(missing)}", "MISSING_FIELDS")
@@ -61,6 +75,9 @@ def device_weight():
         return error(*auth_error)
 
     data = request.get_json(silent=True) or {}
+    assignment_error = _reject_client_assignments(data)
+    if assignment_error:
+        return assignment_error
     missing = missing_fields(data, ["device_id"])
     if missing:
         return error(f"Missing required fields: {', '.join(missing)}", "MISSING_FIELDS")

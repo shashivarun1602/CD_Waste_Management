@@ -163,10 +163,14 @@ async function loadTransportDetail(transportId) {
       ['Lifecycle status', transport.status],
       ['Verification status', transport.weight_status],
       ['Expected weight', waste?.estimated_weight_kg == null ? null : `${waste.estimated_weight_kg} kg`],
-      ['Loaded weight', transport.loaded_weight_kg == null ? null : `${transport.loaded_weight_kg} kg`],
-      ['Received weight', transport.received_weight_kg == null ? null : `${transport.received_weight_kg} kg`],
+      ['Official loaded weight', transport.loaded_weight_kg == null ? null : `${transport.loaded_weight_kg} kg`],
+      ['Official received weight', transport.received_weight_kg == null ? null : `${transport.received_weight_kg} kg`],
       ['Difference', transport.weight_difference_kg == null ? null : `${transport.weight_difference_kg} kg`],
       ['Difference percentage', transport.difference_percentage == null ? null : `${transport.difference_percentage}%`],
+      ['Latest sensor reading', transport.latest_sensor_reading?.weight_kg == null
+        ? transport.latest_sensor_reading ? `Uncalibrated · raw ${transport.latest_sensor_reading.raw_value ?? 'not available'}` : null
+        : `${transport.latest_sensor_reading.weight_kg} kg`],
+      ['Latest sensor reading time', transport.latest_sensor_reading?.timestamp],
       ['Route status', transport.latest_route_status || latestGps?.route_status],
       ['Route deviation', latestGps?.deviation_distance_meters == null ? null : `${latestGps.deviation_distance_meters} m`],
       ['Latest latitude', latestGps?.latitude],
@@ -175,16 +179,54 @@ async function loadTransportDetail(transportId) {
       ['Started', transport.started_at],
       ['Arrived', transport.arrived_at],
       ['Verified', transport.verified_at],
+      ['Mismatch review reason', transport.mismatch_closure_reason],
+      ['Mismatch closed from status', transport.mismatch_closed_from_status],
+      ['Mismatch reviewed', transport.mismatch_reviewed_at],
+      ['Mismatch closed', transport.mismatch_closed_at],
       ['Completed', transport.completed_at]
     ];
     $('#transport-detail-fields').innerHTML = details.map(([label, value]) => `<div class="detail-item"><dt>${esc(label)}</dt><dd>${displayValue(value)}</dd></div>`).join('');
+    const captureActions = [];
+    if (transport.status === 'Created' && transport.loaded_weight_kg == null) {
+      captureActions.push('<button class="primary-button" data-capture-weight="load">Capture site-loading weight</button>');
+    }
+    if (['In Transit', 'Arrived'].includes(transport.status) && transport.received_weight_kg == null) {
+      captureActions.push('<button class="primary-button" data-capture-weight="received">Capture facility-received weight</button>');
+    }
+    if (transport.status === 'Mismatch') {
+      captureActions.push('<button class="primary-button" data-close-mismatch>Close reviewed mismatch</button>');
+    }
+    $('#transport-detail-actions').innerHTML = captureActions.join('');
+    document.querySelectorAll('[data-capture-weight]').forEach((button) => button.addEventListener('click', () => captureTransportWeight(transportId, button.dataset.captureWeight)));
+    $('#transport-detail-actions [data-close-mismatch]')?.addEventListener('click', () => closeMismatchTransport(transportId));
     const gpsHistory = transport.gps_history || [];
     $('#transport-gps-table').innerHTML = gpsHistory.length ? gpsHistory.map((point) => `<tr><td>${displayValue(point.timestamp)}</td><td>${displayValue(point.latitude)}</td><td>${displayValue(point.longitude)}</td><td>${displayValue(point.route_status)}</td><td>${displayValue(point.deviation_distance_meters)}</td></tr>`).join('') : emptyRow('Not available', 5);
-    const weightHistory = transport.weight_history || [];
-    $('#transport-weight-table').innerHTML = weightHistory.length ? weightHistory.map((reading) => `<tr><td>${displayValue(reading.timestamp)}</td><td>${displayValue(reading.raw_value)}</td><td>${displayValue(reading.calibration_status)}</td><td>${reading.weight_kg == null ? 'Not available' : `${esc(reading.weight_kg)} kg`}</td><td>${displayValue(reading.source)}</td></tr>`).join('') : emptyRow('Not available', 5);
   } catch (error) {
     flash(error.message, true);
     $('#transport-detail-fields').innerHTML = '<div class="detail-item"><dt>Transport</dt><dd>Unable to load transport details.</dd></div>';
+  }
+}
+async function captureTransportWeight(transportId, kind) {
+  const endpoint = kind === 'load' ? 'capture-load' : 'capture-received';
+  try {
+    const result = await api.post(`/transports/${encodeURIComponent(transportId)}/${endpoint}`, {});
+    flash(result ? `Official ${kind === 'load' ? 'loading' : 'received'} weight captured.` : 'Weight capture completed.');
+    await Promise.all([loadTransportDetail(transportId), loadTransports()]);
+  } catch (error) {
+    flash(error.message, true);
+  }
+}
+async function closeMismatchTransport(transportId) {
+  const reason = prompt('Required mismatch review reason / disposition:');
+  if (reason === null) return;
+  if (!reason.trim()) return flash('Enter a reason before closing the mismatch.', true);
+  if (!confirm(`Close mismatch for ${transportId}? The Mismatch result and weights will be preserved, and its vehicle will be released.`)) return;
+  try {
+    await api.post(`/transports/${encodeURIComponent(transportId)}/close-mismatch`, { reason: reason.trim() });
+    flash('Mismatch reviewed and transport closed.');
+    await Promise.all([loadTransportDetail(transportId), loadTransports()]);
+  } catch (error) {
+    flash(error.message, true);
   }
 }
 async function loadVehicles() { try { const vehicles = await dashboard.vehicles(); $('#vehicles-table').innerHTML = vehicles.length ? vehicles.map((vehicle) => `<tr><td>${esc(vehicle.vehicle_id)}</td><td><strong>${esc(vehicle.registration_number)}</strong></td><td>${esc(vehicle.vehicle_type)}</td><td>${esc(vehicle.capacity_kg)} kg</td><td>${statusTag(vehicle.status)}</td><td><button class="text-button" data-history="${esc(vehicle.vehicle_id)}">View history</button></td></tr>`).join('') : emptyRow('Register your first vehicle.', 6); document.querySelectorAll('[data-history]').forEach((button) => button.addEventListener('click', () => showHistory(button.dataset.history))); } catch (error) { $('#vehicles-table').innerHTML = emptyRow('Unable to load vehicles. Is MongoDB running?', 6); } }
@@ -273,11 +315,21 @@ async function loadDevices() {
         ? `${Number(gps.latitude).toFixed(5)}, ${Number(gps.longitude).toFixed(5)}`
         : '---';
       const weight = reading.weight_kg == null ? '---' : `${esc(reading.weight_kg)} kg`;
-      return `<tr><td><strong>${esc(device.device_id)}</strong></td><td>${esc(device.vehicle_id || '-')}</td><td>${statusTag(device.online_status || 'OFFLINE')}<br><small>${esc(device.status || '')}</small></td><td>${esc(device.active_transport_id || 'None')}</td><td>${coordinates}</td><td>${esc(gps.satellites ?? '--')} / ${gps.gps_fix ? 'FIX' : 'NO FIX'}</td><td>${esc(reading.raw_value ?? '---')}</td><td>${esc(reading.calibration_status || 'NOT_SET')}</td><td>${weight}</td></tr>`;
-    }).join('') : emptyRow('Register an ESP32 device.', 9);
+      return `<tr><td><strong>${esc(device.device_id)}</strong></td><td>${esc(device.vehicle_id || '-')}</td><td>${statusTag(device.online_status || 'OFFLINE')}<br><small>${esc(device.status || '')}</small></td><td>${esc(device.active_transport_id || device.transport_assignment_error || 'None')}</td><td>${coordinates}</td><td>${esc(gps.satellites ?? '--')} / ${gps.gps_fix ? 'FIX' : 'NO FIX'}</td><td>${esc(reading.raw_value ?? '---')}</td><td>${esc(reading.calibration_status || 'NOT_SET')}</td><td>${weight}</td><td><button class="text-button" data-reassign-device="${esc(device.device_id)}" data-vehicle-id="${esc(device.vehicle_id || '')}">${device.vehicle_id ? 'Reassign vehicle' : 'Assign vehicle'}</button></td></tr>`;
+    }).join('') : emptyRow('Register an ESP32 device.', 10);
+    document.querySelectorAll('[data-reassign-device]').forEach((button) => button.addEventListener('click', () => {
+      openModal(
+        `Assign ${button.dataset.reassignDevice} to a vehicle`,
+        [{ name: 'vehicle_id', label: 'Vehicle ID' }],
+        (data) => api.put(`/devices/${encodeURIComponent(button.dataset.reassignDevice)}`, data),
+        'Save assignment',
+        'Device vehicle assignment updated.',
+      );
+      $('#modal-form [name="vehicle_id"]').value = button.dataset.vehicleId;
+    }));
     const select = $('#simulation-device');
-    if (select) select.innerHTML = devices.map((device) => `<option value="${esc(device.device_id)}" data-transport-id="${esc(device.active_transport_id || '')}">${esc(device.device_id)} -> ${esc(device.vehicle_id || 'unassigned')} (${esc(device.active_transport_id || 'no active transport')})</option>`).join('');
-  } catch (error) { $('#devices-table').innerHTML = emptyRow('Unable to load devices. Is MongoDB running?', 9); }
+    if (select) select.innerHTML = devices.map((device) => `<option value="${esc(device.device_id)}">${esc(device.device_id)} -> ${esc(device.vehicle_id || 'unassigned')} (${esc(device.active_transport_id || 'no active transport')})</option>`).join('');
+  } catch (error) { $('#devices-table').innerHTML = emptyRow('Unable to load devices. Is MongoDB running?', 10); }
 }
 async function loadTransports() { try { const transports = await dashboard.transports(); $('#transport-table').innerHTML = transports.length ? transports.map((item) => `<tr><td><strong>${esc(item.transport_id)}</strong></td><td>${esc(item.site_id)}<br><small>${esc(item.facility_id)}</small></td><td>${esc(item.vehicle_id)}<br><small>${esc(item.device_id || 'No device')}</small></td><td>${esc(item.waste_type || item.waste_id)}</td><td>${item.latest_weight_kg ?? item.loaded_weight_kg ?? '-'} kg</td><td>${statusTag(item.latest_route_status)}</td><td>${statusTag(item.status)}</td><td>${actionButton(item)}</td></tr>`).join('') : emptyRow('Create a transport to begin tracking chain of custody.', 8); bindTransportActions(); } catch (error) { $('#transport-table').innerHTML = emptyRow('Unable to load transports. Is MongoDB running?', 8); } }
 function actionButton(item) { const actions = { Created: ['load', 'Enter load'], Loaded: ['start', 'Start trip'], 'In Transit': ['arrive', 'Mark arrived'], Arrived: ['verify', 'Verify weight'], Verified: ['complete', 'Complete'] }; const action = actions[item.status]; return action ? `<button class="text-button" data-action="${action[0]}" data-id="${esc(item.transport_id)}">${action[1]}</button>` : item.status === 'Mismatch' ? '<span style="color:#a75c18;font-size:11px">Review mismatch</span>' : '<span style="color:var(--muted);font-size:11px">Complete</span>'; }
@@ -286,7 +338,6 @@ async function lifecycle(id, action) { try { let data = {}; if (action === 'load
 async function loadGps() { try { const points = await dashboard.gps(); $('#gps-feed').innerHTML = points.length ? points.slice(0, 8).map((point) => `<div class="feed-item"><strong>${esc(point.transport_id)}</strong> · ${point.latitude == null || point.longitude == null ? 'No GPS fix' : `${Number(point.latitude).toFixed(4)}, ${Number(point.longitude).toFixed(4)}`}<br><small>${esc(point.satellites ?? '--')} satellites · ${point.gps_fix === false ? 'NO FIX' : point.gps_fix === true ? 'FIX' : 'fix unknown'} · ${esc(point.source)}</small></div>`).join('') : '<div class="feed-item">No GPS points recorded yet.</div>'; } catch (error) { $('#gps-feed').innerHTML = '<div class="feed-item">Unable to load GPS feed.</div>'; } }
 async function sendSimulatedGps(latitude, longitude) {
   const select = $('#simulation-device');
-  const option = select.selectedOptions[0];
   const deviceId = select.value;
   const token = $('#device-api-token').value.trim();
   if (!deviceId) return flash('Register or select a device with an active transport.', true);
@@ -294,7 +345,6 @@ async function sendSimulatedGps(latitude, longitude) {
   try {
     const result = await api.post('/device/gps', {
       device_id: deviceId,
-      transport_id: option.dataset.transportId || undefined,
       latitude,
       longitude,
       satellites: 8,
@@ -307,7 +357,7 @@ async function sendSimulatedGps(latitude, longitude) {
   } catch (error) { flash(error.message, true); }
 }
 
-function openModal(title, fields, submit) { $('#modal-content').innerHTML = `<p class="eyebrow">Manual entry</p><h2>${title}</h2><form id="modal-form" class="form-grid" style="padding:25px 0 0">${fields.map((field) => `<label>${field.label}<input name="${field.name}" type="${field.type || 'text'}" ${field.required === false ? '' : 'required'}></label>`).join('')}<button class="primary-button" type="submit">Create record</button></form>`; $('#modal').classList.add('open'); $('#modal').setAttribute('aria-hidden', 'false'); $('#modal-form').addEventListener('submit', async (event) => { event.preventDefault(); const form = new FormData(event.target); const data = Object.fromEntries(form.entries()); fields.filter((field) => field.type === 'number').forEach((field) => { if (data[field.name]) data[field.name] = Number(data[field.name]); }); try { await submit(data); $('#modal').classList.remove('open'); flash('Record created successfully.'); showView(state.currentView); } catch (error) { flash(error.message, true); } }); }
+function openModal(title, fields, submit, actionLabel = 'Create record', successMessage = 'Record created successfully.') { $('#modal-content').innerHTML = `<p class="eyebrow">Manual entry</p><h2>${title}</h2><form id="modal-form" class="form-grid" style="padding:25px 0 0">${fields.map((field) => `<label>${field.label}<input name="${field.name}" type="${field.type || 'text'}" ${field.required === false ? '' : 'required'}></label>`).join('')}<button class="primary-button" type="submit">${actionLabel}</button></form>`; $('#modal').classList.add('open'); $('#modal').setAttribute('aria-hidden', 'false'); $('#modal-form').addEventListener('submit', async (event) => { event.preventDefault(); const form = new FormData(event.target); const data = Object.fromEntries(form.entries()); fields.filter((field) => field.type === 'number').forEach((field) => { if (data[field.name]) data[field.name] = Number(data[field.name]); }); try { await submit(data); $('#modal').classList.remove('open'); flash(successMessage); showView(state.currentView); } catch (error) { flash(error.message, true); } }); }
 async function showHistory(vehicleId) { try { const records = await api.get(`/vehicles/${vehicleId}/history`); openModal(`${vehicleId} history`, [], async () => {}); $('#modal-content').innerHTML += `<div class="table-wrap" style="margin-top:20px"><table><thead><tr><th>Transport</th><th>Site</th><th>Facility</th><th>Status</th></tr></thead><tbody>${records.length ? records.map((item) => `<tr><td>${esc(item.transport_id)}</td><td>${esc(item.site_id)}</td><td>${esc(item.facility_id)}</td><td>${statusTag(item.status)}</td></tr>`).join('') : emptyRow('No historical trips.', 4)}</tbody></table></div>`; $('#modal-form')?.remove(); } catch (error) { flash(error.message, true); } }
 
 document.querySelectorAll('.nav-item,[data-view]').forEach((button) => button.addEventListener('click', () => showView(button.dataset.view)));
@@ -327,7 +377,7 @@ $('#add-transport').addEventListener('click', () => openModal('Create transport'
 $('#device-gps-form').addEventListener('submit', async (event) => { event.preventDefault(); const data = Object.fromEntries(new FormData(event.target)); await sendSimulatedGps(Number(data.latitude), Number(data.longitude)); });
 $('#device-api-token').value = sessionStorage.getItem('device-api-token') || '';
 $('#device-api-token').addEventListener('input', (event) => sessionStorage.setItem('device-api-token', event.target.value));
-$('#device-weight-form').addEventListener('submit', async (event) => { event.preventDefault(); const data = Object.fromEntries(new FormData(event.target)); const token = $('#device-api-token').value.trim(); if (!token) return flash('Enter the device API token.', true); try { const result = await api.post('/device/weight', { device_id: $('#simulation-device').value, transport_id: $('#simulation-device').selectedOptions[0]?.dataset.transportId || undefined, weight_kg: Number(data.weight_kg), timestamp: new Date().toISOString() }, { 'X-Device-Token': token }); $('#simulation-status').innerHTML = `<div class="feed-item"><strong>Weight routed</strong><br>${esc(result.device_id)} -> ${esc(result.vehicle_id)} -> ${esc(result.transport_id)} · ${esc(result.weight_kg)} kg</div>` + $('#simulation-status').innerHTML; loadDevices(); } catch (error) { flash(error.message, true); } });
+$('#device-weight-form').addEventListener('submit', async (event) => { event.preventDefault(); const data = Object.fromEntries(new FormData(event.target)); const token = $('#device-api-token').value.trim(); if (!token) return flash('Enter the device API token.', true); try { const result = await api.post('/device/weight', { device_id: $('#simulation-device').value, weight_kg: Number(data.weight_kg), timestamp: new Date().toISOString() }, { 'X-Device-Token': token }); $('#simulation-status').innerHTML = `<div class="feed-item"><strong>Weight routed</strong><br>${esc(result.device_id)} -> ${esc(result.vehicle_id)} -> ${esc(result.transport_id)} · ${esc(result.weight_kg)} kg</div>` + $('#simulation-status').innerHTML; loadDevices(); } catch (error) { flash(error.message, true); } });
 $('#simulate-route').addEventListener('click', () => { const latitude = Number($('#device-gps-form [name="latitude"]').value); const longitude = Number($('#device-gps-form [name="longitude"]').value); sendSimulatedGps(latitude || 17.385, longitude || 78.4867); });
 $('#simulate-deviation').addEventListener('click', () => { const latitude = Number($('#device-gps-form [name="latitude"]').value) || 17.385; const longitude = Number($('#device-gps-form [name="longitude"]').value) || 78.4867; sendSimulatedGps(latitude + 0.02, longitude - 0.02); });
 showView(new URLSearchParams(location.search).get('view') || 'dashboard');

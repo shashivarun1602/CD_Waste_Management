@@ -59,6 +59,14 @@ def load_transport(transport_id):
         return error(str(exc), "INVALID_LIFECYCLE", 404 if isinstance(exc, LookupError) else 400)
 
 
+@transport_bp.post("/transports/<transport_id>/capture-load")
+def capture_loaded_weight(transport_id):
+    try:
+        return success(transport_service.capture_loaded_weight(transport_id), "Official loading weight captured")
+    except (LookupError, ValueError) as exc:
+        return error(str(exc), "WEIGHT_CAPTURE_FAILED", 404 if isinstance(exc, LookupError) else 400)
+
+
 @transport_bp.post("/transports/<transport_id>/start")
 def start_transport(transport_id):
     try:
@@ -84,6 +92,14 @@ def arrive_transport(transport_id):
         return error(str(exc), "INVALID_LIFECYCLE", 404 if isinstance(exc, LookupError) else 400)
 
 
+@transport_bp.post("/transports/<transport_id>/capture-received")
+def capture_received_weight(transport_id):
+    try:
+        return success(transport_service.capture_received_weight(transport_id), "Official received weight captured")
+    except (LookupError, ValueError) as exc:
+        return error(str(exc), "WEIGHT_CAPTURE_FAILED", 404 if isinstance(exc, LookupError) else 400)
+
+
 @transport_bp.post("/transports/<transport_id>/verify")
 def verify_transport(transport_id):
     try:
@@ -98,6 +114,20 @@ def complete_transport(transport_id):
         return success(transport_service.complete_transport(transport_id), "Transport completed")
     except (LookupError, ValueError) as exc:
         return error(str(exc), "COMPLETION_FAILED", 404 if isinstance(exc, LookupError) else 400)
+
+
+@transport_bp.post("/transports/<transport_id>/close-mismatch")
+def close_mismatch_transport(transport_id):
+    data = request.get_json(silent=True) or {}
+    try:
+        transport = transport_service.close_mismatch_transport(transport_id, data.get("reason"))
+        return success(transport, "Mismatch reviewed and transport closed")
+    except LookupError as exc:
+        return error(str(exc), "TRANSPORT_NOT_FOUND", 404)
+    except RuntimeError as exc:
+        return error(str(exc), "RESOURCE_BUSY", 409)
+    except ValueError as exc:
+        return error(str(exc), "MISMATCH_CLOSURE_FAILED", 400)
 
 
 @transport_bp.post("/transports/<transport_id>/weight")
