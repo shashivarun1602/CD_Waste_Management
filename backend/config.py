@@ -8,11 +8,13 @@ load_dotenv(BASE_DIR / ".env")
 
 
 class Config:
-    DEBUG = os.getenv("FLASK_DEBUG", "1") == "1"
+    DEBUG = os.getenv("FLASK_DEBUG", "0") == "1"
     PORT = int(os.getenv("PORT", "5000"))
     MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
+    MONGO_SERVER_SELECTION_TIMEOUT_MS = int(os.getenv("MONGO_SERVER_SELECTION_TIMEOUT_MS", "5000"))
     DATABASE_NAME = os.getenv("DATABASE_NAME", "cd_waste_management")
     VERIFICATION_THRESHOLD_PERCENT = float(os.getenv("VERIFICATION_THRESHOLD_PERCENT", "5"))
     ROUTE_DEVIATION_THRESHOLD_METERS = float(os.getenv("ROUTE_DEVIATION_THRESHOLD_METERS", "500"))
     DEVICE_API_TOKEN = os.getenv("DEVICE_API_TOKEN", "")
     DEVICE_ONLINE_WINDOW_SECONDS = int(os.getenv("DEVICE_ONLINE_WINDOW_SECONDS", "90"))
+    CORS_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "").split(",") if origin.strip()]

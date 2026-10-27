@@ -16,6 +16,7 @@ COLLECTIONS = (
     "devices",
     "device_assignments",
     "weight_readings",
+    "audit_log",
     "counters",
 )
 
@@ -23,7 +24,7 @@ COLLECTIONS = (
 def get_database():
     global _client, _database
     if _database is None:
-        _client = MongoClient(Config.MONGO_URI, serverSelectionTimeoutMS=1500)
+        _client = MongoClient(Config.MONGO_URI, serverSelectionTimeoutMS=Config.MONGO_SERVER_SELECTION_TIMEOUT_MS)
         _database = _client[Config.DATABASE_NAME]
     return _database
 
@@ -40,6 +41,7 @@ def init_db():
         "gps_tracking": [("transport_id", ASCENDING), ("vehicle_id", ASCENDING), ("device_id", ASCENDING), ("timestamp", DESCENDING)],
         "devices": [("device_id", ASCENDING), ("vehicle_id", ASCENDING), ("status", ASCENDING)],
         "weight_readings": [("reading_id", ASCENDING), ("transport_id", ASCENDING), ("vehicle_id", ASCENDING), ("device_id", ASCENDING), ("timestamp", DESCENDING)],
+        "audit_log": [("timestamp", DESCENDING), ("actor", ASCENDING), ("path", ASCENDING)],
     }
     try:
         try:

@@ -1,4 +1,4 @@
 Flask
 Flask-CORS
-pymongo
+pymongo[srv]
 python-dotenv

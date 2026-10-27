@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "regions": ["bom1"],
+  "functions": {
+    "app.py": {
+      "excludeFiles": "{.venv/**,venv/**,.git/**,.pytest_cache/**,**/__pycache__/**,backend/tests/**,firmware/**,*.md,*.db,backend/.env,backend/atlas_tls_log.txt,backend/test_atlas.py,inspect_*.py}"
+    }
+  }
+}
