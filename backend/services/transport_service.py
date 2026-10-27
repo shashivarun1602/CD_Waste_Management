@@ -26,7 +26,7 @@ def list_transports(query=None):
         device = collection("devices").find_one({"vehicle_id": transport.get("vehicle_id")}, {"_id": 0, "device_id": 1})
         latest_weight = collection("weight_readings").find_one({"transport_id": transport.get("transport_id")}, sort=[("timestamp", -1)])
         transport["waste_type"] = waste.get("waste_type") if waste else None
-        transport["device_id"] = device.get("device_id") if device else None
+        transport["device_id"] = (device.get("device_id") if device else None) or transport.get("device_id")
         transport["latest_weight_kg"] = latest_weight.get("weight_kg") if latest_weight else transport.get("latest_weight_kg")
         transport["latest_route_status"] = transport.get("latest_route_status", "NO_ROUTE")
     return transports
@@ -43,7 +43,7 @@ def get_transport(transport_id):
             sort=[("timestamp", -1)],
         )
         device = collection("devices").find_one({"vehicle_id": transport.get("vehicle_id")}, {"_id": 0, "device_id": 1})
-        transport["device_id"] = device.get("device_id") if device else None
+        transport["device_id"] = (device.get("device_id") if device else None) or transport.get("device_id")
     return transport
 
 
